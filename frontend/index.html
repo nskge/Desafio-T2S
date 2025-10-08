@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DevReview AI</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f4f7f9; color: #333; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; margin: 0; padding-top: 50px; }
+        .container { background: #fff; padding: 40px; border-radius: 12px; box-shadow: 0 8px
+        30px rgba(0,0,0,0.1); width: 100%; max-width: 700px; text-align: center; }
+        h1 { color: #1a2b4d; }
+        input[type="text"] { width: 80%; padding: 12px; border: 1px solid #ccc; border-radius: 6px; margin-bottom: 20px; font-size: 16px; }
+        button { background-color: #007bff; color: white; padding: 12px 25px; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; transition: background-color 0.3s; }
+        button:disabled { background-color: #aaa; cursor: not-allowed; }
+        #status-area { margin-top: 25px; background: #e9ecef; padding: 15px; border-radius: 8px; text-align: left; }
+        
+        /* Estilos do Ranking */
+        #ranking-area { margin-top: 30px; text-align: left; }
+        #ranking-list { list-style-type: decimal; padding-left: 20px; }
+        #ranking-list li { background: #f8f9fa; margin-bottom: 10px; padding: 15px; border-radius: 8px; border-left: 5px solid #007bff; display: flex; justify-content: space-between; align-items: center; }
+        #ranking-list li .repo-url { font-size: 1.1em; word-break: break-all; }
+        #ranking-list li .score { font-size: 1.5em; font-weight: bold; color: #1a2b4d; background: #e9ecef; padding: 5px 10px; border-radius: 6px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>DevReview AI</h1>
+        <p>Insira a URL de um repositório GitHub para iniciar a análise.</p>
+        
+        <form id="repo-form">
+            <input type="text" id="repo-url" placeholder="https://github.com/usuario/projeto" required>
+            <br>
+            <button type="submit" id="submit-btn">Analisar</button>
+        </form>
+
+        <div id="status-area" style="display: none;">
+            <strong>Status:</strong> <span id="status-message"></span>
+        </div>
+        
+        <div id="ranking-area">
+            <h2>Ranking de Projetos</h2>
+            <ol id="ranking-list"></ol>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('repo-form');
+        const repoUrlInput = document.getElementById('repo-url');
+        const submitBtn = document.getElementById('submit-btn');
+        const statusArea = document.getElementById('status-area');
+        const statusMessage = document.getElementById('status-message');
+        const rankingList = document.getElementById('ranking-list');
+
+        let pollingInterval;
+        let projects = []; // Array para armazenar os resultados dos projetos
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const repoUrl = repoUrlInput.value;
+
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Analisando...';
+            statusArea.style.display = 'block';
+            statusMessage.textContent = 'Enviando requisição...';
+            if (pollingInterval) clearInterval(pollingInterval);
+
+            try {
+                const response = await fetch('/api/analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ repo_url: repoUrl })
+                });
+
+                if (!response.ok) throw new Error('Falha ao iniciar a análise.');
+                const data = await response.json();
+                pollingInterval = setInterval(() => checkStatus(data.task_id), 3000);
+
+            } catch (error) {
+                statusMessage.textContent = `Erro: ${error.message}`;
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Analisar';
+            }
+        });
+
+        async function checkStatus(taskId) {
+            try {
+                const response = await fetch(`/api/status/${taskId}`);
+                if (!response.ok) throw new Error('Servidor retornou um erro.');
+                const data = await response.json();
+                statusMessage.textContent = data.message;
+
+                if (data.status === 'SUCCESS' || data.status === 'FAILURE') {
+                    clearInterval(pollingInterval);
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Analisar';
+                    statusArea.style.display = 'none'; // Esconde a área de status
+
+                    if (data.status === 'SUCCESS' && data.result) {
+                        // Adiciona o novo projeto ao array e atualiza o ranking
+                        projects.push(data.result);
+                        updateRanking();
+                    }
+                }
+            } catch (error) {
+                statusMessage.textContent = `Erro ao verificar status: ${error.message}`;
+                clearInterval(pollingInterval);
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Analisar';
+            }
+        }
+
+        function updateRanking() {
+            // 1. Ordena os projetos pela pontuação (do maior para o menor)
+            projects.sort((a, b) => b.overall_score - a.overall_score);
+
+            // 2. Limpa a lista atual no HTML
+            rankingList.innerHTML = '';
+
+            // 3. Cria e adiciona os novos itens da lista
+            projects.forEach(project => {
+                const listItem = document.createElement('li');
+                listItem.innerHTML = `
+                    <span class="repo-url">${project.repo_url}</span>
+                    <span class="score">${project.overall_score.toFixed(1)}</span>
+                `;
+                rankingList.appendChild(listItem);
+            });
+        }
+    </script>
+</body>
+</html>
